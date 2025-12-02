@@ -19,7 +19,8 @@ from opentelemetry.sdk.trace import TracerProvider, export
 from vertexai import agent_engines
 from vertexai.preview.reasoning_engines import AdkApp
 
-from app.agent import root_agent
+
+from app.agent import root_agent # Import your root agent here, ADJUST AS NEEDED
 from app.config import config, get_deployment_config
 from app.utils.gcs import create_bucket_if_not_exists
 from app.utils.tracing import CloudTraceLoggingSpanExporter
@@ -127,9 +128,9 @@ def deploy_agent_engine_app() -> agent_engines.AgentEngine:
     with open(deployment_config.requirements_file) as f:
         requirements = f.read().strip().split("\n")
 
-    # Step 6: Create the agent engine app
+    # Step 6: Create the agent engine app 
     agent_engine = AgentEngineApp(
-        agent=root_agent,
+        agent=root_agent,  # Use your imported root agent here, ADJUST AS NEEDED
         artifact_service_builder=lambda: GcsArtifactService(
             bucket_name=artifacts_bucket_name
         ),
