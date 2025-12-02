@@ -14,7 +14,6 @@ export interface EndpointConfig {
  * Detects the current deployment environment based on available environment variables
  */
 function detectEnvironment(): EndpointConfig["environment"] {
-  // Check for Google Cloud deployment indicators
   if (
     process.env.GOOGLE_CLOUD_PROJECT ||
     process.env.K_SERVICE ||
@@ -22,8 +21,6 @@ function detectEnvironment(): EndpointConfig["environment"] {
   ) {
     return "cloud";
   }
-
-  // Default to local development
   return "local";
 }
 
@@ -31,17 +28,8 @@ function detectEnvironment(): EndpointConfig["environment"] {
  * Detects the deployment type based on environment variables
  */
 function detectDeploymentType(): EndpointConfig["deploymentType"] {
-  // Check for Agent Engine deployment (only use endpoint)
-  if (process.env.AGENT_ENGINE_ENDPOINT) {
-    return "agent_engine";
-  }
-
-  // Check for Cloud Run deployment
-  if (process.env.K_SERVICE || process.env.CLOUD_RUN_SERVICE) {
-    return "cloud_run";
-  }
-
-  // Default to local development
+  if (process.env.AGENT_ENGINE_ENDPOINT) return "agent_engine";
+  if (process.env.K_SERVICE || process.env.CLOUD_RUN_SERVICE) return "cloud_run";
   return "local";
 }
 
@@ -53,28 +41,21 @@ function getBackendUrl(): string {
 
   switch (deploymentType) {
     case "agent_engine":
-      // Agent Engine endpoint - only use the specific endpoint
       if (process.env.AGENT_ENGINE_ENDPOINT) {
         return process.env.AGENT_ENGINE_ENDPOINT;
       }
-      throw new Error(
-        "AGENT_ENGINE_ENDPOINT environment variable is required for Agent Engine deployment"
-      );
+      throw new Error("AGENT_ENGINE_ENDPOINT must be set for Agent Engine deployment");
 
     case "cloud_run":
-      // Cloud Run deployment - use the service URL
       if (process.env.CLOUD_RUN_SERVICE_URL) {
         return process.env.CLOUD_RUN_SERVICE_URL;
       }
       break;
 
-    case "local":
     default:
-      // Local development - use configured backend URL or default
       return process.env.BACKEND_URL || "http://127.0.0.1:8000";
   }
 
-  // Fallback to default local development URL
   return process.env.BACKEND_URL || "http://127.0.0.1:8000";
 }
 
@@ -82,7 +63,6 @@ function getBackendUrl(): string {
  * Gets the Agent Engine URL for direct Agent Engine API calls
  */
 function getAgentEngineUrl(): string | undefined {
-  // Only use the direct endpoint, no more individual env var construction
   return process.env.AGENT_ENGINE_ENDPOINT || undefined;
 }
 
@@ -100,67 +80,45 @@ export function createEndpointConfig(): EndpointConfig {
     deploymentType,
   };
 
-  // Log configuration in development
   if (process.env.NODE_ENV === "development") {
-    console.log("🔧 Endpoint Configuration:", {
-      environment: config.environment,
-      deploymentType: config.deploymentType,
-      backendUrl: config.backendUrl,
-      agentEngineUrl: config.agentEngineUrl,
-    });
+    console.log("🔧 Endpoint Configuration:", config);
   }
 
   return config;
 }
 
 /**
- * Get the current endpoint configuration
+ * Current endpoint configuration
  */
 export const endpointConfig = createEndpointConfig();
 
 /**
- * Utility function to get authentication headers for Google Cloud API calls
+ * Utility function to get authentication headers
+ * Uses Workload Identity Federation (no JSON keys needed)
  */
 export async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  // For Agent Engine deployment, we need proper Google Cloud authentication
+  // Only add auth when talking to Agent Engine
   if (endpointConfig.deploymentType === "agent_engine") {
     try {
-      // Use base64-encoded service account key from environment variables (for Vercel deployment)
-      const serviceAccountKeyBase64 =
-        process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64;
-
-      if (!serviceAccountKeyBase64) {
-        throw new Error(
-          "GOOGLE_SERVICE_ACCOUNT_KEY_BASE64 environment variable is required for Agent Engine deployment"
-        );
-      }
-
-      // Decode the base64-encoded service account key
-      const serviceAccountKeyJson = Buffer.from(
-        serviceAccountKeyBase64,
-        "base64"
-      ).toString("utf-8");
-      const credentials = JSON.parse(serviceAccountKeyJson);
-
-      // Use the service account to get an access token
       const { GoogleAuth } = await import("google-auth-library");
+
       const auth = new GoogleAuth({
-        credentials,
         scopes: ["https://www.googleapis.com/auth/cloud-platform"],
       });
 
+      // Google automatically uses Workload Identity Federation
       const authClient = await auth.getClient();
       const accessToken = await authClient.getAccessToken();
 
-      if (accessToken.token) {
+      if (accessToken?.token) {
         headers["Authorization"] = `Bearer ${accessToken.token}`;
       }
     } catch (error) {
-      console.error("Failed to get Google Cloud access token:", error);
+      console.error("Failed to get Google Cloud access token via WIF:", error);
       throw new Error("Authentication failed");
     }
   }
@@ -178,9 +136,6 @@ export function shouldUseAgentEngine(): boolean {
   );
 }
 
-/**
- * Agent Engine endpoint types
- */
 export type AgentEngineEndpointType = "query" | "streamQuery" | "sessions";
 
 /**
@@ -189,17 +144,14 @@ export type AgentEngineEndpointType = "query" | "streamQuery" | "sessions";
 function getAgentEngineSessionsUrl(): string | undefined {
   if (!endpointConfig.agentEngineUrl) return undefined;
 
-  // Sessions API uses v1beta1, construct from the base URL parts
   const urlParts = endpointConfig.agentEngineUrl.match(
     /^(https:\/\/[^\/]+)\/v1\/(projects\/[^\/]+\/locations\/[^\/]+\/reasoningEngines\/[^\/]+)/
   );
 
-  if (urlParts) {
-    const [, baseUrl, projectPath] = urlParts;
-    return `${baseUrl}/v1beta1/${projectPath}`;
-  }
+  if (!urlParts) return undefined;
 
-  return undefined;
+  const [, baseUrl, projectPath] = urlParts;
+  return `${baseUrl}/v1beta1/${projectPath}`;
 }
 
 /**
@@ -210,7 +162,6 @@ export function getEndpointForPath(
   endpointType: AgentEngineEndpointType = "streamQuery"
 ): string {
   if (shouldUseAgentEngine()) {
-    // For Agent Engine, return the appropriate endpoint based on operation type
     if (endpointType === "streamQuery") {
       return `${endpointConfig.agentEngineUrl}:streamQuery`;
     } else if (endpointType === "query") {
@@ -218,20 +169,17 @@ export function getEndpointForPath(
     } else if (endpointType === "sessions") {
       const sessionsUrl = getAgentEngineSessionsUrl();
       if (!sessionsUrl) {
-        throw new Error(
-          "Could not construct sessions API URL from AGENT_ENGINE_ENDPOINT"
-        );
+        throw new Error("Could not construct sessions API URL");
       }
       return `${sessionsUrl}/sessions${path}`;
     }
   }
 
-  // For other deployments, append the path to the backend URL
   return `${endpointConfig.backendUrl}${path}`;
 }
 
 /**
- * Gets the Agent Engine streaming endpoint for chat responses
+ * Gets the Agent Engine streaming endpoint
  */
 export function getAgentEngineStreamEndpoint(): string {
   return getEndpointForPath("", "streamQuery");
