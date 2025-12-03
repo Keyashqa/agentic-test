@@ -94,7 +94,13 @@ export const endpointConfig = createEndpointConfig();
 
 /**
  * Utility function to get authentication headers
- * Uses Workload Identity Federation (no JSON keys needed)
+ * Uses Workload Identity Federation (WIF) - no JSON keys needed
+ * 
+ * How it works:
+ * 1. GoogleAuth detects GOOGLE_CLOUD_WORKLOAD_PROVIDER env var
+ * 2. GoogleAuth exchanges the workload identity for a Google access token
+ * 3. No service account JSON key file is required
+ * 4. Works in any environment (local dev, Vercel, Cloud Run, etc.)
  */
 export async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
@@ -106,20 +112,44 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     try {
       const { GoogleAuth } = await import("google-auth-library");
 
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "🔐 [WIF] Getting access token via Workload Identity Federation..."
+        );
+        console.log(
+          "📍 [WIF] Workload Provider:",
+          process.env.GOOGLE_CLOUD_WORKLOAD_PROVIDER?.substring(0, 50) + "..."
+        );
+      }
+
       const auth = new GoogleAuth({
         scopes: ["https://www.googleapis.com/auth/cloud-platform"],
       });
 
-      // Google automatically uses Workload Identity Federation
+      // GoogleAuth automatically uses Workload Identity Federation
+      // It detects GOOGLE_CLOUD_WORKLOAD_PROVIDER and exchanges identity tokens for access tokens
       const authClient = await auth.getClient();
       const accessToken = await authClient.getAccessToken();
 
       if (accessToken?.token) {
         headers["Authorization"] = `Bearer ${accessToken.token}`;
+        if (process.env.NODE_ENV === "development") {
+          console.log("✅ [WIF] Successfully obtained access token");
+        }
+      } else {
+        throw new Error("No access token returned from GoogleAuth");
       }
     } catch (error) {
-      console.error("Failed to get Google Cloud access token via WIF:", error);
-      throw new Error("Authentication failed");
+      console.error(
+        "❌ [WIF] Failed to get Google Cloud access token via Workload Identity Federation:",
+        error
+      );
+      console.error(
+        "💡 Make sure GOOGLE_CLOUD_WORKLOAD_PROVIDER is set in your environment."
+      );
+      throw new Error(
+        `Authentication failed: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 

@@ -132,7 +132,17 @@ def initialize_vertex_ai(config: AgentConfiguration) -> None:
         print(f"  Location: {config.location}")
         print(f"  Staging Bucket: {config.staging_bucket or 'Not set'}")
 
+        # Check if using Workload Identity Federation
+        if os.environ.get("GOOGLE_CLOUD_WORKLOAD_PROVIDER"):
+            print(
+                "🔐 [WIF] Using Workload Identity Federation for authentication"
+            )
+            print(
+                "   No service account JSON key needed!"
+            )
+
         # Initialize Vertex AI (config values already validated in __post_init__)
+        # Note: google.auth.default() automatically uses WIF if GOOGLE_CLOUD_WORKLOAD_PROVIDER is set
         if config.staging_bucket:
             vertexai.init(
                 project=config.project_id,
